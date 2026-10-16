@@ -480,6 +480,13 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         receive(datas);
     }
 
+    /** USB 원문 사이에 공통 분석기의 상태 변화 로그를 구분하여 표시합니다. */
+    @Override
+    public void onPlcLog(String message) {
+        pendingNewline = false;
+        status("\n" + message);
+    }
+
     @Override
     public void onSerialIoError(Exception e) {
         status("connection lost: " + e.getMessage());

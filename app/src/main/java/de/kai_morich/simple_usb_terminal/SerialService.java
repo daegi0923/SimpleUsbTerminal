@@ -34,16 +34,20 @@ public class SerialService extends Service implements SerialListener {
         SerialService getService() { return SerialService.this; }
     }
 
-    private enum QueueType {Connect, ConnectError, Read, IoError}
+    private enum QueueType {Connect, ConnectError, Read, IoError, PlcLog}
 
     private static class QueueItem {
         QueueType type;
         ArrayDeque<byte[]> datas;
         Exception e;
+        String message;
 
         QueueItem(QueueType type) { this.type=type; if(type==QueueType.Read) init(); }
         QueueItem(QueueType type, Exception e) { this.type=type; this.e=e; }
         QueueItem(QueueType type, ArrayDeque<byte[]> datas) { this.type=type; this.datas=datas; }
+
+        /** 상태 로그를 화면 재연결 시에도 전달할 수 있도록 보관합니다. */
+        QueueItem(String message) { this.type=QueueType.PlcLog; this.message=message; }
 
         void init() { datas = new ArrayDeque<>(); }
         void add(byte[] data) { datas.add(data); }
@@ -75,7 +79,7 @@ public class SerialService extends Service implements SerialListener {
     public void onCreate() {
         super.onCreate();
         plcCapture = new PlcCaptureLog(new java.io.File(getFilesDir(), "plc-logs"), 5 * 1024 * 1024, "USB",
-                message -> android.util.Log.i("PlcMock", message),
+                this::onPlcLog,
                 message -> {
                     android.util.Log.e("PlcMock", message);
                     mainLooper.post(() -> android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show());
@@ -138,6 +142,7 @@ public class SerialService extends Service implements SerialListener {
                 case Connect:       listener.onSerialConnect      (); break;
                 case ConnectError:  listener.onSerialConnectError (item.e); break;
                 case Read:          listener.onSerialRead         (item.datas); break;
+                case PlcLog:        listener.onPlcLog             (item.message); break;
                 case IoError:       listener.onSerialIoError      (item.e); break;
             }
         }
@@ -146,6 +151,7 @@ public class SerialService extends Service implements SerialListener {
                 case Connect:       listener.onSerialConnect      (); break;
                 case ConnectError:  listener.onSerialConnectError (item.e); break;
                 case Read:          listener.onSerialRead         (item.datas); break;
+                case PlcLog:        listener.onPlcLog             (item.message); break;
                 case IoError:       listener.onSerialIoError      (item.e); break;
             }
         }
@@ -248,6 +254,22 @@ public class SerialService extends Service implements SerialListener {
         }
     }
 
+    /** 공통 분석기의 결과를 Logcat과 USB 화면에 전달하며 화면 분리 중에는 보관합니다. */
+    @Override
+    public void onPlcLog(String message) {
+        android.util.Log.i("PlcMock", message);
+        synchronized (this) {
+            if (listener != null) {
+                mainLooper.post(() -> {
+                    if (listener != null) listener.onPlcLog(message);
+                    else queue1.add(new QueueItem(message));
+                });
+            } else {
+                queue2.add(new QueueItem(message));
+            }
+        }
+    }
+
     public void onSerialRead(ArrayDeque<byte[]> datas) { throw new UnsupportedOperationException(); }
 
     /**
@@ -260,7 +282,7 @@ public class SerialService extends Service implements SerialListener {
      */
     public void onSerialRead(byte[] data) {
         if(connected) {
-            plcCapture.receive(data, System.currentTimeMillis(), ScSettings.get(this));
+            long receivedAt = System.currentTimeMillis();
             synchronized (this) {
                 if (listener != null) {
                     boolean first;
@@ -288,6 +310,7 @@ public class SerialService extends Service implements SerialListener {
                     queue2.getLast().add(data);
                 }
             }
+            plcCapture.receive(data, receivedAt, ScSettings.get(this));
         }
     }
 

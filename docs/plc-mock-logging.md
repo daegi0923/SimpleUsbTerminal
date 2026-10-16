@@ -103,6 +103,8 @@ A(Laden·컨테이너 O·호이스트 동작)→ E(Twist Lock)
 상태 화면과 Logcat에는 읽기 쉬운 상태 변화만 표시한다. 상태 파일에는 같은 문구와 잡음 수, 세션·호기 변경, 대기열 누락 진단도 기록한다. 원문 숫자는 PLC CSV에 보존하며 상태 설명에는 표시하지 않는다. HTTP 요청이나 JSON 요청 본문은 출력하지 않는다.
 Logcat 필터는 tag:PlcMock이다.
 
+USB 수신 화면에서도 원문과 함께 상태 변화 로그를 표시한다. `SerialService`가 기존 `PlcCaptureLog`의 분석 결과를 `SerialListener.onPlcLog`로 전달하고, `TerminalFragment`가 상태 글자색과 줄바꿈으로 구분한다. 분석 규칙과 로그 문구는 CSV 재생과 같은 `PlcStateMonitor`를 사용한다. 화면이 분리된 동안의 결과는 기존 서비스 대기열에 보관하고 화면 재연결 시 전달한다. 분석은 비동기로 처리하므로 원문 한 행마다 바로 뒤에 붙는 형태를 보장하지는 않는다.
+
 ## 모듈 경계
 
 아래 추가 기능 파일은 `app/src/main/java/de/kai_morich/simple_usb_terminal/plc/`에 위치한다. SerialSocket과 SerialService는 기존 상위 패키지에 남아 있다. 전체 트리는 [프로젝트 구조 안내](../PROJECT_STRUCTURE.md)를 참고한다.

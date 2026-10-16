@@ -7,5 +7,7 @@ interface SerialListener {
     void onSerialConnectError (Exception e);
     void onSerialRead         (byte[] data);                // socket -> service
     void onSerialRead         (ArrayDeque<byte[]> datas);   // service -> UI thread
+    /** PLC 분석 결과를 USB 수신 화면에 전달합니다. */
+    default void onPlcLog(String message) { }
     void onSerialIoError      (Exception e);
 }
