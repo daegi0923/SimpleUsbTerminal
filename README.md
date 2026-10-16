@@ -34,3 +34,9 @@ The app uses the [usb-serial-for-android](https://github.com/mik3y/usb-serial-fo
 I got various requests asking for help with Android development or source code for my
 [Serial USB Terminal](https://play.google.com/store/apps/details?id=de.kai_morich.serial_usb_terminal) app.
 Here you find a simplified version of my app.
+
+## PLC 현장 테스트 기능
+
+추가한 PLC 기능은 `app/src/main/java/de/kai_morich/simple_usb_terminal/plc/`에 모아두었다.
+폴더별 역할과 기존 코드의 연결 지점은 [프로젝트 구조 안내](PROJECT_STRUCTURE.md)를 참고한다.
+사용법은 [PLC 수신·CSV 재생·로그](docs/plc-mock-logging.md)를 참고한다.

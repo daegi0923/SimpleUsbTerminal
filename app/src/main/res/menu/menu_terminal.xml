@@ -4,33 +4,39 @@
     <item
         android:id="@+id/clear"
         android:icon="@drawable/ic_delete_white_24dp"
-        android:title="Clear"
+        android:title="화면 지우기"
         app:showAsAction="always" />
     <item
         android:id="@+id/newline"
+        android:visible="false"
         android:title="Newline"
         app:showAsAction="never" />
     <item
         android:id="@+id/hex"
+        android:visible="false"
         android:title="HEX Mode"
         android:checkable="true"
         app:showAsAction="never" />
     <item
         android:id="@+id/controlLines"
+        android:visible="false"
         android:title="Control Lines"
         android:checkable="true"
         app:showAsAction="never" />
     <item
         android:id="@+id/flowControl"
+        android:visible="false"
         android:title="Flow Control"
         app:showAsAction="never" />
     <item
         android:id="@+id/backgroundNotification"
+        android:visible="false"
         android:title="Notification if App in background"
         android:checkable="true"
         app:showAsAction="never" />
     <item
         android:id="@+id/sendBreak"
+        android:visible="false"
         android:title="Send BREAK"
         app:showAsAction="never" />
 </menu>

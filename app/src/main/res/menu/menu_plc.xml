@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/sc_settings" android:title="SC 호기 입력 / 수정" />
+    <item android:id="@+id/plc_test" android:title="PLC CSV 재생 테스트" />
+    <item android:id="@+id/log_folder" android:title="로그 자동 저장 폴더 선택" />
+</menu>

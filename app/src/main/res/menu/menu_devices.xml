@@ -2,8 +2,8 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:id="@+id/refresh"
-        android:title="Refresh Devices" />
+        android:title="USB 장치 새로고침" />
     <item
         android:id="@+id/baud_rate"
-        android:title="Baud rate" />
+        android:title="USB 통신 속도" />
 </menu>

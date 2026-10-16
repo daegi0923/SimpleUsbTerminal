@@ -323,7 +323,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
                 status("Setting serial parameters failed: " + e.getMessage());
             }
             SerialSocket socket = new SerialSocket(getActivity().getApplicationContext(), usbConnection, usbSerialPort);
-            service.connect(socket);
+            service.connect(socket, baudRate);
             // usb connect is not asynchronous. connect-success and connect-error are returned immediately from socket.connect
             // for consistency to bluetooth/bluetooth-LE app use same SerialListener and SerialService classes
             onSerialConnect();

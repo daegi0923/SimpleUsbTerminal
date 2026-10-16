@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent" android:layout_height="match_parent"
+    android:orientation="vertical" android:padding="12dp">
+    <TextView android:id="@+id/sc_number" android:layout_width="match_parent" android:layout_height="wrap_content" android:textSize="18sp" />
+
+    <Button android:id="@+id/choose_csv" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="CSV 파일 선택" />
+    <TextView android:id="@+id/csv_file" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="선택한 파일 없음" />
+    <Button android:id="@+id/run_test" android:layout_width="match_parent" android:layout_height="wrap_content" android:text="재생 시작" />
+    <ScrollView android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1">
+        <TextView android:id="@+id/plc_logs" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:textIsSelectable="true" android:fontFamily="monospace" android:textSize="12sp" />
+    </ScrollView>
+</LinearLayout>

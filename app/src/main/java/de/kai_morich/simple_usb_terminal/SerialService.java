@@ -1,5 +1,9 @@
 package de.kai_morich.simple_usb_terminal;
 
+import de.kai_morich.simple_usb_terminal.plc.PlcCaptureLog;
+import de.kai_morich.simple_usb_terminal.plc.PlcLogFolder;
+import de.kai_morich.simple_usb_terminal.plc.ScSettings;
+
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
@@ -53,6 +57,7 @@ public class SerialService extends Service implements SerialListener {
     private SerialSocket socket;
     private SerialListener listener;
     private boolean connected;
+    private PlcCaptureLog plcCapture;
 
     /**
      * Lifecylce
@@ -65,10 +70,24 @@ public class SerialService extends Service implements SerialListener {
         lastRead = new QueueItem(QueueType.Read);
     }
 
+    /** 서비스 시작 시 앱 내부 저장소에 PLC 기록을 준비합니다. */
+    @Override
+    public void onCreate() {
+        super.onCreate();
+        plcCapture = new PlcCaptureLog(new java.io.File(getFilesDir(), "plc-logs"), 5 * 1024 * 1024, "USB",
+                message -> android.util.Log.i("PlcMock", message),
+                message -> {
+                    android.util.Log.e("PlcMock", message);
+                    mainLooper.post(() -> android.widget.Toast.makeText(this, message, android.widget.Toast.LENGTH_LONG).show());
+                });
+        plcCapture.setDestination(new PlcLogFolder(this));
+    }
+
     @Override
     public void onDestroy() {
         cancelNotification();
         disconnect();
+        plcCapture.close();
         super.onDestroy();
     }
 
@@ -81,13 +100,15 @@ public class SerialService extends Service implements SerialListener {
     /**
      * Api
      */
-    public void connect(SerialSocket socket) throws IOException {
+    public void connect(SerialSocket socket, int baudRate) throws IOException {
+        plcCapture.session("CONNECT " + socket.getName() + " baud=" + baudRate + " dataBits=8 stopBits=1 parity=NONE");
         socket.connect(this);
         this.socket = socket;
         connected = true;
     }
 
     public void disconnect() {
+        if (connected) plcCapture.session("DISCONNECT");
         connected = false; // ignore data,errors while disconnecting
         cancelNotification();
         if(socket != null) {
@@ -239,6 +260,7 @@ public class SerialService extends Service implements SerialListener {
      */
     public void onSerialRead(byte[] data) {
         if(connected) {
+            plcCapture.receive(data, System.currentTimeMillis(), ScSettings.get(this));
             synchronized (this) {
                 if (listener != null) {
                     boolean first;
@@ -271,6 +293,7 @@ public class SerialService extends Service implements SerialListener {
 
     public void onSerialIoError(Exception e) {
         if(connected) {
+            plcCapture.session("IO_ERROR " + e.getMessage());
             synchronized (this) {
                 if (listener != null) {
                     mainLooper.post(() -> {
