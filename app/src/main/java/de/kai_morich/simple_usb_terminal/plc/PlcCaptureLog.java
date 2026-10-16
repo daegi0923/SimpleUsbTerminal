@@ -142,32 +142,21 @@ public final class PlcCaptureLog {
         }
     }
 
-    /** 분석 이벤트를 파일에 남기고 요약 및 모의 요청을 Logcat에 전달합니다. */
+    /** 상태 변화는 화면에 표시하고 진단 정보는 파일에만 보관합니다. */
     private void analysis(String message) {
-        if (message.startsWith("FRAME")) return;
         append("ANALYSIS", message);
-        events.log(source + " SC=" + scNumber + " " + message);
+        if (!message.startsWith("DISCARD")) events.log(source + " | " + message);
     }
 
-    /** JSON 문자열의 제어 문자와 구분 문자를 이스케이프합니다. */
-    private String escape(String value) {
-        StringBuilder result = new StringBuilder();
-        for (int i = 0; i < value.length(); i++) {
-            char ch = value.charAt(i);
-            if (ch == '\\' || ch == '"') result.append('\\').append(ch);
-            else if (ch < 32) result.append(String.format("\\u%04x", (int) ch));
-            else result.append(ch);
-        }
-        return result.toString();
-    }
-
-    /** PLC 원문 CSV와 상태 JSONL을 날짜별로 기록하고 파일을 분할합니다. */
+    /** PLC 원문 CSV와 상태 텍스트을 날짜별로 기록하고 파일을 분할합니다. */
     private void append(String type, String value) {
         boolean raw = type.equals("RX");
-        byte[] line = raw ? PlcCsv.row(observedAt, value).getBytes(StandardCharsets.UTF_8)
-                : ("{\"receivedAtEpochMs\":" + observedAt + ",\"type\":\"" + type
-                + "\",\"source\":\"" + source + "\",\"scNumber\":\"" + scNumber
-                + "\",\"value\":\"" + escape(value) + "\"}\n").getBytes(StandardCharsets.UTF_8);
+        String stateLine = type.equals("ANALYSIS") && !value.startsWith("DISCARD")
+                ? source + " | " + value
+                : PlcCsv.formatTimestamp(observedAt) + " | " + source + " | SC "
+                    + (scNumber.isEmpty() ? "미설정" : scNumber) + " | [" + type + "] "
+                    + value.replace("\r", "\\r").replace("\n", "\\n");
+        byte[] line = (raw ? PlcCsv.row(observedAt, value) : stateLine + "\n").getBytes(StandardCharsets.UTF_8);
         try {
             if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("로그 폴더 생성 실패");
             File activeFile = selectFile(raw ? "plc" : "state", line.length);
@@ -190,7 +179,7 @@ public final class PlcCaptureLog {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
         String day = format.format(new Date(observedAt));
-        String extension = kind.equals("plc") ? ".csv" : ".jsonl";
+        String extension = kind.equals("plc") ? ".csv" : ".log";
         String prefix = source.toLowerCase(Locale.US) + "-" + kind + "-" + day + "-";
         File active = activeFiles.get(prefix);
         if (active == null) {

@@ -92,7 +92,34 @@ public class PlcTestFragment extends Fragment {
             startActivityForResult(intent, 45);
         });
         run.setOnClickListener(v -> { if (playing) stop(); else start(); });
+        loadBuiltInCycle();
         return view;
+    }
+
+    /** 화면 진입 시 내장된 한 사이클 CSV를 기본 재생 데이터로 준비합니다. */
+    private void loadBuiltInCycle() {
+        int version = ++loadVersion;
+        android.content.res.Resources resources = getResources();
+        choose.setEnabled(false);
+        fileLabel.setText("내장 한 사이클 CSV를 읽는 중입니다…");
+        loader.execute(() -> {
+            try (InputStream stream = resources.openRawResource(R.raw.plc_full_cycle_approx_1s)) {
+                List<PlcCsv.Entry> loaded = PlcCsv.read(new InputStreamReader(stream, StandardCharsets.UTF_8));
+                handler.post(() -> {
+                    if (version != loadVersion || fileLabel == null) return;
+                    entries = loaded;
+                    fileLabel.setText("내장 한 사이클 (가상 데이터) · " + loaded.size() + "개 레코드 · 약 50초");
+                    run.setEnabled(true);
+                    choose.setEnabled(true);
+                });
+            } catch (Exception e) {
+                handler.post(() -> {
+                    if (version != loadVersion || fileLabel == null) return;
+                    fileLabel.setText("내장 CSV 읽기 실패: " + e.getMessage());
+                    choose.setEnabled(true);
+                });
+            }
+        });
     }
 
     /** 저장된 SC 호기와 설정 메뉴의 위치를 표시합니다. */
@@ -168,7 +195,7 @@ public class PlcTestFragment extends Fragment {
         if (choose != null) choose.setEnabled(true);
     }
 
-    /** 상태 변경과 모의 요청 결과를 화면 및 Logcat에 표시합니다. */
+    /** 이전·현재 상태와 작업 패턴을 화면 및 Logcat에 표시합니다. */
     private void showLog(String message) {
         android.util.Log.i("PlcMock", message);
         handler.post(() -> {

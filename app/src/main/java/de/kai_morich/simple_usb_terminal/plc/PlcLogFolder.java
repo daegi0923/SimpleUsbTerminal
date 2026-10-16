@@ -38,7 +38,8 @@ public final class PlcLogFolder implements PlcCaptureLog.Destination {
             files.clear();
             selected = folder;
         }
-        String filename = name.replace(".jsonl", ".txt");
+        String filename = name.endsWith(".log")
+                ? name.replace("-state-", "-state-readable-").replace(".log", ".txt") : name;
         String kind = filename.contains("-plc-") ? "plc" : "state";
         if (filename.equals(streamNames.get(kind))) {
             OutputStream stream = streams.get(kind);

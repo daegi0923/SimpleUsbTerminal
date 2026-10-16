@@ -44,7 +44,7 @@ public final class PlcCsvTest {
         replay.start(entries);
         scheduler.drain();
         check(times.toString().equals("[0, 100, 100, 4000]"), "relative replay times");
-        check(complete[0] == 1 && events.stream().anyMatch(e -> e.contains("PICKUP_INFERRED")), "same analysis pipeline");
+        check(complete[0] == 1 && events.stream().anyMatch(e -> e.contains("컨테이너 픽업 완료 패턴 추정")), "same analysis pipeline");
         int previous = times.size();
         replay.start(entries);
         replay.stop();

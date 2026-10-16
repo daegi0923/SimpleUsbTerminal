@@ -1,6 +1,6 @@
 package de.kai_morich.simple_usb_terminal.plc;
 
-/** PLC 수신 데이터를 분석하고 상태 변경 요청의 모의 로그를 제공합니다. */
+/** PLC 수신 데이터를 분석하고 읽기 쉬운 상태 변화 로그를 제공합니다. */
 final class PlcStateMonitor {
     interface Logger {
         /** 분석 로그를 출력합니다. */
@@ -16,7 +16,6 @@ final class PlcStateMonitor {
     private final Logger logger;
     private final Clock clock;
     private char previousState;
-    private long validFrames;
     private long discardedBytes;
     private String scNumber = "";
     private String history = "";
@@ -68,7 +67,6 @@ final class PlcStateMonitor {
     void reset() {
         pending.setLength(0);
         previousState = 0;
-        validFrames = 0;
         discardedBytes = 0;
         history = "";
     }
@@ -87,33 +85,43 @@ final class PlcStateMonitor {
         return pending.substring(6).equals("3000");
     }
 
-    /** 최초 상태를 기록하고 이후 Prefix 변경에만 모의 요청을 출력합니다. */
+    /** 최초 상태를 기록하고 Prefix가 바뀔 때만 이전·현재 상태와 작업 패턴을 표시합니다. */
     private void processFrame(String frame) {
-        validFrames++;
         char state = frame.charAt(0);
-        logger.log("FRAME state=" + state + " position=" + frame.substring(1, 6) + " raw=" + frame);
         if (state == previousState) return;
         history += state;
         if (history.length() > 4) history = history.substring(history.length() - 4);
-        long receivedAt = clock.now();
-        String counts = " validFrames=" + validFrames + " discardedBytes=" + discardedBytes;
+        String context = PlcCsv.formatTimestamp(clock.now()) + " | SC "
+                + (scNumber.isEmpty() ? "미설정" : scNumber) + "\n";
         if (previousState == 0) {
-            logger.log("BASELINE receivedAtEpochMs=" + receivedAt + " state=" + state
-                    + " position=" + frame.substring(1, 6) + " raw=" + frame + counts);
-        } else if (scNumber.isEmpty()) {
-            logger.log("REQUEST_SKIPPED SC 호기 미설정 from=" + previousState + " to=" + state);
+            logger.log(context + "[초기 상태]\n" + describe(state) + "\n");
         } else {
-            String event = state == 'E' ? "TWIST_LOCK" : state == 'F' ? "TWIST_UNLOCK"
-                    : state == 'A' ? "LADEN_HOISTING" : "IDLE_HOISTING";
-            String operation = history.equals("BFEA") ? "PICKUP_INFERRED"
-                    : history.equals("AEFB") ? "DROP_OFF_INFERRED" : "UNDETERMINED";
-            logger.log("DRY_RUN POST /mock/plc/state body={\"receivedAtEpochMs\":" + receivedAt
-                    + ",\"from\":\"" + previousState + "\",\"to\":\"" + state
-                    + "\",\"position\":\"" + frame.substring(1, 6)
-                    + "\",\"raw\":\"" + frame + "\",\"scNumber\":\"" + scNumber
-                    + "\",\"event\":\"" + event + "\",\"operation\":\"" + operation
-                    + "\",\"evidence\":\"" + history + "\"}" + counts);
+            String trail = history.substring(0, 1);
+            for (int i = 1; i < history.length(); i++) trail += "→" + history.charAt(i);
+            logger.log(context + "[상태 변경]\n" + describe(previousState) + "→ " + describe(state)
+                    + "\n" + operation() + "\n관찰 순서: " + trail + "\n");
         }
         previousState = state;
+    }
+
+    /** 전달받은 Prefix 정의를 사람이 읽을 수 있는 상태명으로 표시합니다. */
+    private String describe(char state) {
+        switch (state) {
+            case 'A': return "A(Laden·컨테이너 O·호이스트 동작)";
+            case 'B': return "B(Idle·컨테이너 X·호이스트 동작)";
+            case 'E': return "E(Twist Lock)";
+            default: return "F(Twist Unlock)";
+        }
+    }
+
+    /** 실제로 관찰한 연속 Prefix를 근거로 픽업·하차 패턴의 진행을 추정합니다. */
+    private String operation() {
+        if (history.equals("BFEA")) return "컨테이너 픽업 완료 패턴 추정";
+        if (history.equals("AEFB")) return "컨테이너 하차 완료 패턴 추정";
+        if (history.endsWith("BFE")) return "컨테이너 픽업 진행 패턴 추정 (잠금 단계)";
+        if (history.endsWith("BF")) return "컨테이너 픽업 진행 패턴 추정 (해제 단계)";
+        if (history.endsWith("AEF")) return "컨테이너 하차 진행 패턴 추정 (해제 단계)";
+        if (history.endsWith("AE")) return "컨테이너 하차 진행 패턴 추정 (잠금 단계)";
+        return "픽업·하차 패턴 미확정";
     }
 }

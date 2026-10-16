@@ -24,11 +24,15 @@ final class PlcCsv {
 
     /** 원문 안의 쉼표·따옴표·줄바꿈을 보존하여 CSV 한 행을 생성합니다. */
     static String row(long timestamp, String message) {
+        return formatTimestamp(timestamp) + ",\"" + message.replace("\"", "\"\"") + "\"\r\n";
+    }
+
+    /** 로그에 사용할 한국 시간대의 밀리초 시각을 표시합니다. */
+    static String formatTimestamp(long timestamp) {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
         String time = format.format(new Date(timestamp));
-        time = time.substring(0, time.length() - 2) + ":" + time.substring(time.length() - 2);
-        return time + ",\"" + message.replace("\"", "\"\"") + "\"\r\n";
+        return time.substring(0, time.length() - 2) + ":" + time.substring(time.length() - 2);
     }
 
     /** 헤더·시각 순서·열 수를 검증하고 재생할 CSV 레코드를 읽습니다. */

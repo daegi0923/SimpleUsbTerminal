@@ -31,13 +31,13 @@ public final class PlcCaptureLogTest {
         String text = snapshot(capture, directory);
         check(text.contains("\"B012\""), "raw bytes");
         check(text.contains("DISCARD bytes=4"), "noise diagnostics");
-        check(text.contains("DRY_RUN POST /mock/plc/state"), "mock request");
+        check(text.contains("[상태 변경]"), "readable transition");
         check(new File(directory, "usb-plc-2026-10-13-000000.csv").exists(), "date before midnight");
         check(new File(directory, "usb-plc-2026-10-14-000000.csv").exists(), "date after midnight");
         for (File file : directory.listFiles()) {
             String content = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
             if (file.getName().contains("-plc-")) {
-                check(!content.contains("DRY_RUN") && !content.contains("FRAME"), "raw log separation");
+                check(!content.contains("[상태 변경]") && !content.contains("FRAME"), "raw log separation");
                 check(PlcCsv.read(new java.io.StringReader(content)).size() == 1, "capture CSV can replay");
             }
             if (file.getName().contains("-state-")) check(!content.contains("RX_HEX"), "state log separation");
