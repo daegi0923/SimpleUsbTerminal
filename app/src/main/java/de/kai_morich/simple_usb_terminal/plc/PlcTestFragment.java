@@ -54,8 +54,9 @@ public class PlcTestFragment extends Fragment {
             /** 예약한 재생을 취소합니다. */
             public void cancel(Runnable task) { handler.removeCallbacks(task); }
         }, new CsvReplay.Listener() {
-            /** CSV 메시지를 실제 USB와 같은 분석 경로에 전달합니다. */
+            /** 재생 시점마다 CSV 원문을 표시하고 실제 USB와 같은 분석 경로에 전달합니다. */
             public void receive(PlcCsv.Entry entry) {
+                showLog("[CSV 원문] " + PlcCsv.formatTimestamp(entry.timestamp) + " | " + entry.message);
                 capture.receive(entry.message.getBytes(StandardCharsets.UTF_8), System.currentTimeMillis(), ScSettings.get(requireContext()));
             }
             /** 파일 기록까지 처리된 뒤 완료 상태를 표시합니다. */

@@ -21,7 +21,7 @@ public final class ScSettings {
         input.setHint("300 ~ 399");
         input.setText(get(context));
         AlertDialog dialog = new AlertDialog.Builder(context).setTitle("SC 호기 번호")
-                .setMessage("3으로 시작하는 숫자 3자리를 입력해 주세요.")
+                .setMessage("SC 번호를 입력해주세요. ex)312")
                 .setView(input).setNegativeButton("취소", null).setPositiveButton("저장", null).create();
         dialog.setOnShowListener(ignored -> dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener(v -> {
             String number = input.getText().toString();
