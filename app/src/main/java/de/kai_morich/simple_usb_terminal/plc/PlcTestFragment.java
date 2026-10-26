@@ -45,7 +45,7 @@ public class PlcTestFragment extends Fragment {
         super.onCreate(state);
         capture = new PlcCaptureLog(new File(requireContext().getFilesDir(), "plc-logs/simulation"),
                 5 * 1024 * 1024, "SIMULATION", this::showLog, this::showLog);
-        capture.setDestination(new PlcLogFolder(requireContext()));
+        capture.setDestination(new PlcLogFolder(requireContext(), "simulation/"));
         replay = new CsvReplay(new CsvReplay.Scheduler() {
             /** 시스템 시각 변경의 영향을 받지 않는 재생 시각을 제공합니다. */
             public long now() { return SystemClock.elapsedRealtime(); }
@@ -56,8 +56,9 @@ public class PlcTestFragment extends Fragment {
         }, new CsvReplay.Listener() {
             /** 재생 시점마다 CSV 원문을 표시하고 실제 USB와 같은 분석 경로에 전달합니다. */
             public void receive(PlcCsv.Entry entry) {
-                showLog("[CSV 원문] " + PlcCsv.formatTimestamp(entry.timestamp) + " | " + entry.message);
-                capture.receive(entry.message.getBytes(StandardCharsets.UTF_8), System.currentTimeMillis(), ScSettings.get(requireContext()));
+                byte[] data = entry.bytes();
+                showLog("[CSV 원문] " + PlcCsv.formatTimestamp(entry.timestamp) + " | " + PlcBytes.display(data));
+                capture.receive(data, System.currentTimeMillis(), ScSettings.get(requireContext()));
             }
             /** 파일 기록까지 처리된 뒤 완료 상태를 표시합니다. */
             public void complete() {
@@ -183,6 +184,14 @@ public class PlcTestFragment extends Fragment {
         choose.setEnabled(false);
         run.setText("재생 중지");
         capture.session("CSV_START " + fileLabel.getText() + " firstTimestamp=" + entries.get(0).timestamp);
+        for (PlcCsv.Entry entry : entries) {
+            if (!entry.hasRawBytes && entry.message.indexOf('\ufffd') >= 0) {
+                String warning = "이전 CSV의 � 구간은 원본 바이트가 남아 있지 않습니다. 보존된 값만 재생합니다.";
+                showLog(warning);
+                capture.diagnostic(warning);
+                break;
+            }
+        }
         replay.start(entries);
     }
 

@@ -13,6 +13,8 @@ import java.util.Map;
 /** 사용자가 선택한 폴더에 날짜별 텍스트 로그를 자동 누적합니다. */
 public final class PlcLogFolder implements PlcCaptureLog.Destination {
     private final Context context;
+    private final PlcPublicLogs publicLogs;
+    private final String prefix;
     private final Map<String, Uri> files = new HashMap<>();
     private final Map<String, OutputStream> streams = new HashMap<>();
     private final Map<String, String> streamNames = new HashMap<>();
@@ -20,7 +22,14 @@ public final class PlcLogFolder implements PlcCaptureLog.Destination {
 
     /** 화면 수명과 무관하게 기록할 앱 컨텍스트를 보관합니다. */
     public PlcLogFolder(Context context) {
+        this(context, "");
+    }
+
+    public PlcLogFolder(Context context, String prefix) {
         this.context = context.getApplicationContext();
+        this.prefix = prefix;
+        publicLogs = PlcPublicLogs.get(this.context);
+        publicLogs.requestSync();
     }
 
     /** 마지막으로 선택한 자동 저장 폴더 URI를 조회합니다. */
@@ -31,6 +40,15 @@ public final class PlcLogFolder implements PlcCaptureLog.Destination {
     /** 원문과 상태 로그를 별도 텍스트 파일에 추가합니다. */
     @Override
     public void append(String name, byte[] line) throws IOException {
+        publicLogs.requestSync(prefix + name);
+        try {
+            appendSelected(name, line);
+        } catch (RuntimeException e) {
+            throw new IOException("선택한 자동 저장 폴더에 기록하지 못했습니다.", e);
+        }
+    }
+
+    private void appendSelected(String name, byte[] line) throws IOException {
         String folder = get(context);
         if (folder.isEmpty()) return;
         if (!folder.equals(selected)) {
@@ -39,8 +57,9 @@ public final class PlcLogFolder implements PlcCaptureLog.Destination {
             selected = folder;
         }
         String filename = name.endsWith(".log")
-                ? name.replace("-state-", "-state-readable-").replace(".log", ".txt") : name;
-        String kind = filename.contains("-plc-") ? "plc" : "state";
+                ? name.replace("-state-", "-state-readable-").replace(".log", ".txt")
+                : name.replace("-plc-", "-plc-bytes-");
+        String kind = filename.contains("-plc-") ? "plc" : filename.contains("-diagnostic-") ? "diagnostic" : "state";
         if (filename.equals(streamNames.get(kind))) {
             OutputStream stream = streams.get(kind);
             stream.write(line);
@@ -86,7 +105,7 @@ public final class PlcLogFolder implements PlcCaptureLog.Destination {
         OutputStream stream = new BufferedOutputStream(output);
         streams.put(kind, stream);
         streamNames.put(kind, filename);
-        if (empty) stream.write(PlcCsv.HEADER.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        if (empty) stream.write(PlcCsv.RAW_HEADER.getBytes(java.nio.charset.StandardCharsets.UTF_8));
         stream.write(line);
         stream.flush();
     }

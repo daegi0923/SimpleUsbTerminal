@@ -21,7 +21,7 @@ public final class PlcCaptureLogTest {
             File file = new File(selected, name);
             boolean header = name.endsWith(".csv") && file.length() == 0;
             try (OutputStream out = new FileOutputStream(file, true)) {
-                if (header) out.write(PlcCsv.HEADER.getBytes(StandardCharsets.UTF_8));
+                if (header) out.write(PlcCsv.RAW_HEADER.getBytes(StandardCharsets.UTF_8));
                 out.write(line);
             }
         });
@@ -73,7 +73,30 @@ public final class PlcCaptureLogTest {
         busy.receive("B012343000".getBytes(StandardCharsets.US_ASCII), 1000, "301");
         check(snapshot(busy, busyDir).contains("droppedEvents=44"), "gap position and count");
         busy.close();
-        System.out.println("PASS: separate raw/state files, automatic folder writes, midnight, splitting, restart, overflow");
+        diagnosticsPreservePartialFrames();
+        System.out.println("PASS: separate raw/state files, automatic folder writes, midnight, splitting, restart, overflow, persistent status without frame reset");
+    }
+
+    private static void diagnosticsPreservePartialFrames() throws Exception {
+        File directory = Files.createTempDirectory("plc-status-test").toFile();
+        List<String> events = new ArrayList<>();
+        List<String> errors = new ArrayList<>();
+        PlcCaptureLog capture = new PlcCaptureLog(directory, 5 * 1024 * 1024, "USB", events::add, errors::add);
+        try {
+            capture.receive("B012".getBytes(StandardCharsets.US_ASCII), 1000, "301");
+            capture.diagnostic("USB_CONNECTION_WAIT_TEST");
+            capture.receive("343000".getBytes(StandardCharsets.US_ASCII), 2000, "301");
+            String text = snapshot(capture, directory);
+            check(text.contains("[STATUS] USB_CONNECTION_WAIT_TEST"), "persist diagnostic in state log");
+            check(events.size() == 1 && events.get(0).contains("B(Idle"), "status must not reset a partial PLC frame");
+            for (File file : directory.listFiles()) {
+                if (!file.getName().endsWith(".csv")) continue;
+                String csv = new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8);
+                check(PlcCsv.read(new StringReader(csv)).size() == 2, "diagnostic must not become a received PLC record");
+                check(!csv.contains("USB_CONNECTION_WAIT_TEST"), "diagnostic must stay out of raw CSV");
+            }
+            check(errors.isEmpty(), "diagnostic must not cause a queue gap");
+        } finally { capture.close(); }
     }
 
     /** 대기 중인 파일 기록을 완료한 뒤 저장된 텍스트를 읽습니다. */

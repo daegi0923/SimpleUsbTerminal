@@ -2,6 +2,12 @@ plugins {
     id 'com.android.application'
 }
 
+def keystoreProperties = new Properties()
+def keystorePropertiesFile = rootProject.file('keystore.properties')
+if (keystorePropertiesFile.isFile()) {
+    keystorePropertiesFile.withInputStream { keystoreProperties.load(it) }
+}
+
 android {
     compileSdkVersion 36
     defaultConfig {
@@ -10,15 +16,27 @@ android {
         vectorDrawables.useSupportLibrary true
 
         applicationId "de.kai_morich.simple_usb_terminal"
-        versionCode 1
-        versionName "1.0"
+        versionCode 8
+        versionName "1.7"
+        testInstrumentationRunner "de.kai_morich.simple_usb_terminal.QuietRuntimeInstrumentation"
     }
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    signingConfigs {
+        release {
+            if (keystorePropertiesFile.isFile()) {
+                storeFile rootProject.file(keystoreProperties['storeFile'])
+                storePassword keystoreProperties['storePassword']
+                keyAlias keystoreProperties['keyAlias']
+                keyPassword keystoreProperties['keyPassword']
+            }
+        }
+    }
     buildTypes {
         release {
+            signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
         }
@@ -33,4 +51,12 @@ dependencies {
     implementation libs.usb.serial.for.android
     implementation libs.androidx.appcompat
     implementation libs.material
+}
+
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach {
+    doFirst {
+        if (!keystorePropertiesFile.isFile()) {
+            throw new GradleException('Release signing requires keystore.properties. See docs/development-guide.md.')
+        }
+    }
 }

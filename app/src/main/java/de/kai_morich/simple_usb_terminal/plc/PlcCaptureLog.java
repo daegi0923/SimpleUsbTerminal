@@ -17,6 +17,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 
 /** USB 원문과 PLC 분석 결과를 제한된 파일 용량으로 보관합니다. */
 public final class PlcCaptureLog {
+    // Shared by USB and simulation so exports can capture complete-record boundaries.
+    static final Object FILE_LOCK = new Object();
     public interface Destination {
         /** 선택한 폴더의 로그 파일에 기록을 추가합니다. */
         void append(String name, byte[] line) throws IOException;
@@ -86,7 +88,7 @@ public final class PlcCaptureLog {
                 monitor.setScNumber(next);
                 append("SC_CHANGED", next);
             }
-            append("RX", new String(copy, StandardCharsets.UTF_8));
+            write("plc", PlcCsv.row(observedAt, copy).getBytes(StandardCharsets.UTF_8));
             monitor.accept(copy);
         });
     }
@@ -100,6 +102,17 @@ public final class PlcCaptureLog {
             checkGap(number);
             append("SESSION", name);
             monitor.reset();
+        });
+    }
+
+    /** Records connection status without resetting a partially received PLC message. */
+    public synchronized void diagnostic(String message) {
+        long number = sequence.incrementAndGet();
+        long time = System.currentTimeMillis();
+        submit(() -> {
+            observedAt = time;
+            checkGap(number);
+            append("STATUS", message);
         });
     }
 
@@ -144,27 +157,34 @@ public final class PlcCaptureLog {
 
     /** 상태 변화는 화면에 표시하고 진단 정보는 파일에만 보관합니다. */
     private void analysis(String message) {
-        append("ANALYSIS", message);
+        append(message.startsWith("DISCARD") ? "DIAGNOSTIC" : "ANALYSIS", message);
         if (!message.startsWith("DISCARD")) events.log(source + " | " + message);
     }
 
     /** PLC 원문 CSV와 상태 텍스트을 날짜별로 기록하고 파일을 분할합니다. */
     private void append(String type, String value) {
-        boolean raw = type.equals("RX");
         String stateLine = type.equals("ANALYSIS") && !value.startsWith("DISCARD")
                 ? source + " | " + value
                 : PlcCsv.formatTimestamp(observedAt) + " | " + source + " | SC "
                     + (scNumber.isEmpty() ? "미설정" : scNumber) + " | [" + type + "] "
                     + value.replace("\r", "\\r").replace("\n", "\\n");
-        byte[] line = (raw ? PlcCsv.row(observedAt, value) : stateLine + "\n").getBytes(StandardCharsets.UTF_8);
+        String kind = type.equals("DIAGNOSTIC") || type.equals("STATUS") ? "diagnostic" : "state-changes";
+        write(kind, (stateLine + "\n").getBytes(StandardCharsets.UTF_8));
+    }
+
+    private void write(String kind, byte[] line) {
+        boolean raw = kind.equals("plc");
         try {
-            if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("로그 폴더 생성 실패");
-            File activeFile = selectFile(raw ? "plc" : "state", line.length);
-            boolean header = raw && activeFile.length() == 0;
-            byte[] headerBytes = PlcCsv.HEADER.getBytes(StandardCharsets.UTF_8);
-            try (OutputStream output = new FileOutputStream(activeFile, true)) {
-                if (header) output.write(headerBytes);
-                output.write(line);
+            File activeFile;
+            synchronized (FILE_LOCK) {
+                if (!directory.isDirectory() && !directory.mkdirs()) throw new IOException("로그 폴더 생성 실패");
+                activeFile = selectFile(kind, line.length);
+                boolean header = raw && activeFile.length() == 0;
+                byte[] headerBytes = PlcCsv.RAW_HEADER.getBytes(StandardCharsets.UTF_8);
+                try (OutputStream output = new FileOutputStream(activeFile, true)) {
+                    if (header) output.write(headerBytes);
+                    output.write(line);
+                }
             }
             Destination selected = destination;
             if (selected != null) selected.append(activeFile.getName(), line);
@@ -175,7 +195,7 @@ public final class PlcCaptureLog {
     }
 
     /** 원문과 상태 로그를 한국 날짜별로 나누고 파일 용량 초과 시 분할합니다. */
-    private File selectFile(String kind, int size) {
+    private File selectFile(String kind, int size) throws IOException {
         SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
         format.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
         String day = format.format(new Date(observedAt));
@@ -192,6 +212,8 @@ public final class PlcCaptureLog {
                 }
             }
             active = new File(directory, prefix + String.format(Locale.US, "%06d", part) + extension);
+            if (kind.equals("plc") && active.length() > 0 && !hasRawHeader(active))
+                active = new File(directory, prefix + String.format(Locale.US, "%06d", part + 1) + extension);
         }
         if (active.length() + size > limit && active.length() > 0) {
             String name = active.getName();
@@ -200,5 +222,13 @@ public final class PlcCaptureLog {
         }
         activeFiles.put(prefix, active);
         return active;
+    }
+
+    private static boolean hasRawHeader(File file) throws IOException {
+        byte[] expected = PlcCsv.RAW_HEADER.getBytes(StandardCharsets.UTF_8);
+        try (InputStream input = new FileInputStream(file)) {
+            for (byte value : expected) if (input.read() != (value & 255)) return false;
+        }
+        return true;
     }
 }

@@ -8,7 +8,6 @@ import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 
 import androidx.annotation.NonNull;
-import androidx.fragment.app.Fragment;
 import androidx.fragment.app.ListFragment;
 import android.view.Menu;
 import android.view.MenuInflater;
@@ -48,6 +47,8 @@ public class DevicesFragment extends ListFragment {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setHasOptionsMenu(true);
+        baudRate = savedInstanceState != null ? savedInstanceState.getInt("baudRate", 19200)
+                : ((MainActivity) requireActivity()).getUsbBaudRate();
         listAdapter = new ArrayAdapter<ListItem>(getActivity(), 0, listItems) {
             @NonNull
             @Override
@@ -67,6 +68,12 @@ public class DevicesFragment extends ListFragment {
                 return view;
             }
         };
+    }
+
+    @Override
+    public void onSaveInstanceState(@NonNull Bundle outState) {
+        super.onSaveInstanceState(outState);
+        outState.putInt("baudRate", baudRate);
     }
 
     @Override
@@ -101,7 +108,7 @@ public class DevicesFragment extends ListFragment {
             final String[] baudRates = getResources().getStringArray(R.array.baud_rates);
             int pos = java.util.Arrays.asList(baudRates).indexOf(String.valueOf(baudRate));
             AlertDialog.Builder builder = new AlertDialog.Builder(getActivity());
-            builder.setTitle("Baud rate");
+            builder.setTitle("통신 속도 선택 후 USB 장치를 선택하세요");
             builder.setSingleChoiceItems(baudRates, pos, new DialogInterface.OnClickListener() {
                 public void onClick(DialogInterface dialog, int item) {
                     baudRate = Integer.parseInt(baudRates[item]);
@@ -141,13 +148,7 @@ public class DevicesFragment extends ListFragment {
         if(item.driver == null) {
             Toast.makeText(getActivity(), "no driver", Toast.LENGTH_SHORT).show();
         } else {
-            Bundle args = new Bundle();
-            args.putInt("device", item.device.getDeviceId());
-            args.putInt("port", item.port);
-            args.putInt("baud", baudRate);
-            Fragment fragment = new TerminalFragment();
-            fragment.setArguments(args);
-            getParentFragmentManager().beginTransaction().replace(R.id.fragment, fragment, "terminal").addToBackStack(null).commit();
+            ((MainActivity) requireActivity()).selectUsbDevice(item.device.getDeviceId(), item.port, baudRate);
         }
     }
 

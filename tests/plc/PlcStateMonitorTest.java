@@ -32,8 +32,8 @@ public final class PlcStateMonitorTest {
         for (int i = 0; i < 100000; i++) feed(monitor, "A999993000");
         check(logs.size() == 4, "duplicate and position-only suppression");
 
-        // 잘못된 코드, 숫자, 후행 값과 비 ASCII 잡음에서 복구합니다.
-        feed(monitor, "Z012343000B01x343000E012349999");
+        // Invalid prefixes and nonnumeric payloads must not change state.
+        feed(monitor, "Z012343000B01x343000E0123499x9");
         monitor.accept(new byte[] {(byte) 0xff, 0, 1});
         check(logs.size() == 4, "invalid data must not change state");
         feed(monitor, "junkE000013000F000023000B000033000");

@@ -107,6 +107,26 @@ sdk.dir=/Users/daegi/Library/Android/sdk
 정식 배포용 Release APK는 서명 키와 버전 관리가 필요하며, 같은 앱의 후속 업데이트에는 동일한 서명 키를 유지해야 한다.
 현재 문서의 명령은 개발용 Debug APK 기준이다.
 
+## 서명된 배포 APK
+
+다른 휴대폰에 APK 파일을 직접 전달하려면 배포 키로 서명한 Release APK를 사용한다. 이 프로젝트는 Java 기반 Android 앱이며 Gradle이 빌드와 서명을 함께 처리한다. Release APK는 개발 서버 없이 단독 실행된다.
+
+`keystore.properties.example`을 참고해 레포 루트에 `keystore.properties`를 준비한다. `storeFile`에는 기존 배포 키의 절대 경로를 지정한다. 실제 설정 파일과 `.jks`/`.keystore`/`.p12` 파일은 Git에서 제외한다. 서명 설정이 없으면 Release 빌드는 실패하며 Debug 빌드는 계속 사용할 수 있다.
+
+```sh
+./gradlew assembleRelease lintRelease
+```
+
+출력은 `app/build/outputs/apk/release/app-release.apk`이다. 제어값 변경 이력 분리·순번 기록 버전은 SC Log Miner 1.7, versionCode 8, 앱 ID `de.kai_morich.simple_usb_terminal`, 최소 Android 5.0(API 21)이다. USB 수신에는 휴대폰의 USB Host/OTG 지원과 호환 어댑터가 별도로 필요하다.
+
+2026-10-19 최초 로컬 배포 키는 `~/.android/bct-sc-plc-release/sc-log-miner-release.jks`, 별도 보관용 서명 설정은 같은 폴더의 `keystore.properties`에 생성했다. 이 폴더를 접근 권한을 제한한 별도 저장소에 백업한다. APK 수신자에게는 APK만 전달하고 키와 비밀번호는 전달하지 않는다.
+
+후속 업데이트는 같은 앱 ID와 같은 배포 키를 유지하고 `app/build.gradle`의 versionCode를 올려 빌드한다. 키를 잃으면 기존 앱 위에 업데이트할 수 없다. 기존 Debug APK처럼 서명이 다른 앱이 이미 설치돼 있으면 설치가 거부되므로, 필요한 로그를 먼저 보관한 뒤 기존 앱을 삭제하고 설치해야 한다. 앱 삭제 시 내부 로그와 설정도 삭제된다.
+
+휴대폰에서 APK를 열고 해당 브라우저나 파일 앱의 '알 수 없는 앱 설치'를 허용한다. 회사 기기 관리 정책이 설치를 제한하는 경우에는 관리자 설정이 필요하다. APK 빌드·서명 검증과 실제 PLC 연결 검증은 별개다.
+
+참고: [Android 앱 서명](https://developer.android.com/studio/publish/app-signing), [APK 직접 배포](https://developer.android.com/distribute/marketing-tools/alternative-distribution).
+
 ## 다음 작업과 완료 기준
 
 1. 환경 구성 → 원본 Debug APK 빌드 및 실기기 실행 성공.

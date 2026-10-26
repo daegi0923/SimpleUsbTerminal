@@ -16,6 +16,9 @@ final class PlcStateMonitor {
     private final Logger logger;
     private final Clock clock;
     private char previousState;
+    private char previousCode;
+    private boolean hasPrevious;
+    private long transitionSequence;
     private long discardedBytes;
     private String scNumber = "";
     private String history = "";
@@ -46,9 +49,14 @@ final class PlcStateMonitor {
             }
             pending.append(ch);
             if (pending.length() < 10) continue;
-            if (isFrame()) {
-                processFrame(pending.toString());
+            boolean payload = isFrame();
+            boolean known = isKnownState(displayState(pending.charAt(0)));
+            if (payload && (known || (pending.length() == 11 && pending.charAt(10) == '\r'))) {
+                processFrame(pending.substring(0, 10));
                 pending.setLength(0);
+            } else if (payload && !known && pending.length() == 10) {
+                // Unknown control values need the observed CR terminator, not just nine digits.
+                continue;
             } else {
                 pending.deleteCharAt(0);
                 discardedBytes++;
@@ -67,41 +75,63 @@ final class PlcStateMonitor {
     void reset() {
         pending.setLength(0);
         previousState = 0;
+        previousCode = 0;
+        hasPrevious = false;
+        transitionSequence = 0;
         discardedBytes = 0;
         history = "";
     }
 
     /** 현재 분석에서 정의한 상태 코드인지 확인합니다. */
     private boolean isPrefix(char ch) {
-        return ch == 'A' || ch == 'B' || ch == 'E' || ch == 'F';
+        return isKnownState(ch) || (ch < 32 && ch != '\r' && ch != '\n');
     }
 
-    /** Prefix, 위치 숫자 5자리 및 임시 고정 후행 값 3000을 검증합니다. */
+    private boolean isKnownState(char state) { return state == 'A' || state == 'B' || state == 'E' || state == 'F'; }
+
+    private char displayState(char code) { return code < 32 ? (char) (code + 64) : code; }
+
+    private String controlLabel(char code) {
+        return (code < 32 ? "^" + displayState(code) : Character.toString(code))
+                + "(0x" + PlcBytes.hex(new byte[]{(byte) code}) + ")";
+    }
+
+    /** Both field captures and old samples carry five position digits and four variable digits. */
     private boolean isFrame() {
-        for (int i = 1; i <= 5; i++) {
+        for (int i = 1; i <= 9; i++) {
             char ch = pending.charAt(i);
             if (ch < '0' || ch > '9') return false;
         }
-        return pending.substring(6).equals("3000");
+        return true;
     }
 
     /** 최초 상태를 기록하고 Prefix가 바뀔 때만 이전·현재 상태와 작업 패턴을 표시합니다. */
     private void processFrame(String frame) {
-        char state = frame.charAt(0);
-        if (state == previousState) return;
-        history += state;
+        char code = frame.charAt(0);
+        char state = displayState(code);
+        if (hasPrevious && code == previousCode) return;
+        boolean sameDisplay = hasPrevious && state == previousState;
+        if (!isKnownState(state)) history = "";
+        else if (!sameDisplay) history += state;
         if (history.length() > 4) history = history.substring(history.length() - 4);
         String context = PlcCsv.formatTimestamp(clock.now()) + " | SC "
                 + (scNumber.isEmpty() ? "미설정" : scNumber) + "\n";
-        if (previousState == 0) {
-            logger.log(context + "[초기 상태]\n" + describe(state) + "\n");
+        String values = "위치 원시값: " + frame.substring(1, 6) + " | 후행값: " + frame.substring(6)
+                + " (단위·의미 미확정)\n";
+        String change = "상태 순번: " + (++transitionSequence) + " (세션 내)\n제어값: "
+                + (hasPrevious ? controlLabel(previousCode) + " → " : "") + controlLabel(code) + "\n";
+        if (!hasPrevious) {
+            logger.log(context + "[초기 상태]\n" + describe(state) + "\n" + change + values);
         } else {
-            String trail = history.substring(0, 1);
+            String trail = history.isEmpty() ? "미확정 코드로 순서 초기화" : history.substring(0, 1);
             for (int i = 1; i < history.length(); i++) trail += "→" + history.charAt(i);
             logger.log(context + "[상태 변경]\n" + describe(previousState) + "→ " + describe(state)
-                    + "\n" + operation() + "\n관찰 순서: " + trail + "\n");
+                    + "\n" + (sameDisplay ? "표시 상태 동일 · 작업 패턴 판단 갱신 없음" : operation())
+                    + "\n관찰 순서: " + trail + "\n" + change + values);
         }
         previousState = state;
+        previousCode = code;
+        hasPrevious = true;
     }
 
     /** 전달받은 Prefix 정의를 사람이 읽을 수 있는 상태명으로 표시합니다. */
@@ -110,7 +140,8 @@ final class PlcStateMonitor {
             case 'A': return "A(Laden·컨테이너 O·호이스트 동작)";
             case 'B': return "B(Idle·컨테이너 X·호이스트 동작)";
             case 'E': return "E(Twist Lock)";
-            default: return "F(Twist Unlock)";
+            case 'F': return "F(Twist Unlock)";
+            default: return "^" + state + "(0x" + PlcBytes.hex(new byte[]{(byte) (state - 64)}) + "·상태 의미 미확정)";
         }
     }
 

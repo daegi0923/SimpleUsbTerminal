@@ -30,8 +30,7 @@
         app:showAsAction="never" />
     <item
         android:id="@+id/backgroundNotification"
-        android:visible="false"
-        android:title="Notification if App in background"
+        android:title="상주 알림 표시 설정"
         android:checkable="true"
         app:showAsAction="never" />
     <item

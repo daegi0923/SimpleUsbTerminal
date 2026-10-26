@@ -1,14 +1,10 @@
 package de.kai_morich.simple_usb_terminal;
 
 import android.app.Activity;
-import android.content.BroadcastReceiver;
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
 import android.hardware.usb.UsbDeviceConnection;
 import android.util.Log;
 
-import androidx.core.content.ContextCompat;
 
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.util.SerialInputOutputManager;
@@ -21,10 +17,8 @@ public class SerialSocket implements SerialInputOutputManager.Listener {
     private static final int WRITE_WAIT_MILLIS = 200; // 0 blocked infinitely on unprogrammed arduino
     private final static String TAG = SerialSocket.class.getSimpleName();
 
-    private final BroadcastReceiver disconnectBroadcastReceiver;
 
-    private final Context context;
-    private SerialListener listener;
+    private volatile SerialListener listener;
     private UsbDeviceConnection connection;
     private UsbSerialPort serialPort;
     private SerialInputOutputManager ioManager;
@@ -32,30 +26,25 @@ public class SerialSocket implements SerialInputOutputManager.Listener {
     SerialSocket(Context context, UsbDeviceConnection connection, UsbSerialPort serialPort) {
         if(context instanceof Activity)
             throw new InvalidParameterException("expected non UI context");
-        this.context = context;
         this.connection = connection;
         this.serialPort = serialPort;
-        disconnectBroadcastReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if (listener != null)
-                    listener.onSerialIoError(new IOException("background disconnect"));
-                disconnect(); // disconnect now, else would be queued until UI re-attached
-            }
-        };
+
     }
 
     String getName() { return serialPort.getDriver().getClass().getSimpleName().replace("SerialDriver",""); }
 
+    /** USB control transfers can block, so the service calls this on its port worker. */
+    void prepare() throws IOException {
+        try {
+            serialPort.setDTR(true);
+            serialPort.setRTS(true);
+        } catch (UnsupportedOperationException e) {
+            Log.d(TAG, "Failed to set initial DTR/RTS", e);
+        }
+    }
+
     void connect(SerialListener listener) throws IOException {
         this.listener = listener;
-        ContextCompat.registerReceiver(context, disconnectBroadcastReceiver, new IntentFilter(Constants.INTENT_ACTION_DISCONNECT), ContextCompat.RECEIVER_NOT_EXPORTED);
-	try {
-	    serialPort.setDTR(true); // for arduino, ...
-	    serialPort.setRTS(true);
-	} catch (UnsupportedOperationException e) {
-	    Log.d(TAG, "Failed to set initial DTR/RTS", e);
-	}
         ioManager = new SerialInputOutputManager(serialPort, this);
         ioManager.start();
     }
@@ -83,10 +72,6 @@ public class SerialSocket implements SerialInputOutputManager.Listener {
             connection.close();
             connection = null;
         }
-        try {
-            context.unregisterReceiver(disconnectBroadcastReceiver);
-        } catch (Exception ignored) {
-        }
     }
 
     void write(byte[] data) throws IOException {
@@ -97,13 +82,15 @@ public class SerialSocket implements SerialInputOutputManager.Listener {
 
     @Override
     public void onNewData(byte[] data) {
-        if(listener != null)
-            listener.onSerialRead(data);
+        SerialListener current = listener;
+        if(current != null)
+            current.onSerialRead(data);
     }
 
     @Override
     public void onRunError(Exception e) {
-        if (listener != null)
-            listener.onSerialIoError(e);
+        SerialListener current = listener;
+        if (current != null)
+            current.onSerialIoError(e);
     }
 }

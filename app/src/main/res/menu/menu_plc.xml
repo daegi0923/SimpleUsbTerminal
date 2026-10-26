@@ -1,6 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
+    <item android:id="@+id/usb_terminal" android:title="USB 수신 화면" />
+    <item android:id="@+id/usb_devices" android:title="USB 장치 / 통신 속도" />
+    <item android:id="@+id/usb_retry" android:title="USB 다시 연결" />
+    <item android:id="@+id/usb_stop" android:title="USB 자동 연결 중지" />
     <item android:id="@+id/sc_settings" android:title="SC 호기 입력 / 수정" />
     <item android:id="@+id/plc_test" android:title="PLC CSV 재생 테스트" />
+    <item android:id="@+id/log_export" android:title="쌓인 로그 내보내기 (CSV / LOG)" />
     <item android:id="@+id/log_folder" android:title="로그 자동 저장 폴더 선택" />
 </menu>

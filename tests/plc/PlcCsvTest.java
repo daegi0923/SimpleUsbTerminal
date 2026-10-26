@@ -13,6 +13,21 @@ public final class PlcCsvTest {
         String message = "B012\r\n\"junk,noise\"\n343000";
         List<PlcCsv.Entry> roundtrip = PlcCsv.read(new StringReader("\ufeff" + PlcCsv.HEADER + PlcCsv.row(start, message)));
         check(roundtrip.size() == 1 && roundtrip.get(0).timestamp == start && roundtrip.get(0).message.equals(message), "raw CSV round trip");
+        byte[] all = new byte[256];
+        for (int i = 0; i < all.length; i++) all[i] = (byte) i;
+        List<PlcCsv.Entry> raw = PlcCsv.read(new StringReader(PlcCsv.RAW_HEADER + PlcCsv.row(start, all)));
+        check(raw.get(0).hasRawBytes && java.util.Arrays.equals(raw.get(0).bytes(), all), "HEX round-trip all bytes");
+        byte[] copy = raw.get(0).bytes(); copy[0] = 99;
+        check(raw.get(0).bytes()[0] == 0, "replay bytes are not mutable outside the entry");
+        PlcCsv.Entry authoritative = PlcCsv.read(new StringReader(PlcCsv.RAW_HEADER
+                + PlcCsv.formatTimestamp(start) + ",\"misleading text\",\"FF 02 30\"\r\n")).get(0);
+        check(java.util.Arrays.equals(authoritative.bytes(), new byte[]{(byte)255,2,48}), "HEX is authoritative, not display text");
+        for (String hex : new String[]{"F", "GG", "02-X1"}) {
+            try {
+                PlcCsv.read(new StringReader(PlcCsv.RAW_HEADER + PlcCsv.formatTimestamp(start) + ",\"text\",\"" + hex + "\"\r\n"));
+                throw new AssertionError("invalid hex accepted");
+            } catch (IOException expected) { }
+        }
         for (String invalid : new String[] {
                 "time,message\n", PlcCsv.HEADER,
                 "timestamp,message\n2026-02-30T10:00:00.000+09:00,B012343000\n",
@@ -36,7 +51,7 @@ public final class PlcCsvTest {
             /** 재생 메시지를 같은 상태 분석기에 전달합니다. */
             public void receive(PlcCsv.Entry entry) {
                 times.add(scheduler.now);
-                monitor.accept(entry.message.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                monitor.accept(entry.bytes());
             }
             /** 정상 재생 완료 횟수를 집계합니다. */
             public void complete() { complete[0]++; }

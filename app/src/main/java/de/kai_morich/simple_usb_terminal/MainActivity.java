@@ -1,19 +1,50 @@
 package de.kai_morich.simple_usb_terminal;
 
 import de.kai_morich.simple_usb_terminal.plc.PlcTestFragment;
+import de.kai_morich.simple_usb_terminal.plc.PlcLogExportDialog;
 import de.kai_morich.simple_usb_terminal.plc.ScSettings;
 
+import android.content.ActivityNotFoundException;
+import android.content.ComponentName;
+import android.content.Context;
 import android.content.Intent;
+import android.content.ServiceConnection;
 import android.os.Bundle;
+import android.os.IBinder;
 
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.appcompat.widget.Toolbar;
+import androidx.core.content.ContextCompat;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
 import androidx.fragment.app.FragmentManager;
 
 public class MainActivity extends AppCompatActivity implements FragmentManager.OnBackStackChangedListener {
+
+    private SerialService serialService;
+    private boolean serviceBound;
+    private int[] pendingDeviceSelection;
+    private boolean retryPending, stopPending;
+    private final ServiceConnection serviceConnection = new ServiceConnection() {
+        @Override
+        public void onServiceConnected(ComponentName name, IBinder binder) {
+            serialService = ((SerialService.SerialBinder) binder).getService();
+            serialService.ensureMonitoring();
+            if (pendingDeviceSelection != null) {
+                serialService.selectDevice(pendingDeviceSelection[0], pendingDeviceSelection[1], pendingDeviceSelection[2]);
+                pendingDeviceSelection = null;
+            }
+            if (retryPending) serialService.retryAutomatic();
+            if (stopPending) serialService.stopAutomatic();
+            retryPending = stopPending = false;
+        }
+
+        @Override
+        public void onServiceDisconnected(ComponentName name) {
+            serialService = null;
+        }
+    };
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -29,9 +60,47 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         setSupportActionBar(toolbar);
         getSupportFragmentManager().addOnBackStackChangedListener(this);
         if (savedInstanceState == null)
-            getSupportFragmentManager().beginTransaction().add(R.id.fragment, new DevicesFragment(), "devices").commit();
-        else
+            getSupportFragmentManager().beginTransaction().add(R.id.fragment, new TerminalFragment(), "terminal").commit();
+        else {
             onBackStackChanged();
+            if (getIntent().getAction() == null) showTerminal();
+        }
+    }
+
+    @Override
+    protected void onStart() {
+        super.onStart();
+        Intent serviceIntent = new Intent(this, SerialService.class);
+        ContextCompat.startForegroundService(this, serviceIntent);
+        serviceBound = bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE);
+    }
+
+    @Override
+    protected void onStop() {
+        if (serviceBound) {
+            unbindService(serviceConnection);
+            serviceBound = false;
+        }
+        serialService = null;
+        super.onStop();
+    }
+
+    int getUsbBaudRate() {
+        return serialService != null ? serialService.getBaudRate()
+                : getSharedPreferences("usb", MODE_PRIVATE).getInt("baudRate", 19200);
+    }
+
+    void selectUsbDevice(int deviceId, int port, int baudRate) {
+        retryPending = stopPending = false;
+        if (serialService != null) serialService.selectDevice(deviceId, port, baudRate);
+        else pendingDeviceSelection = new int[]{deviceId, port, baudRate};
+        showTerminal();
+    }
+
+    private void showTerminal() {
+        getSupportFragmentManager().popBackStackImmediate(null, FragmentManager.POP_BACK_STACK_INCLUSIVE);
+        if (!(getSupportFragmentManager().findFragmentById(R.id.fragment) instanceof TerminalFragment))
+            getSupportFragmentManager().beginTransaction().replace(R.id.fragment, new TerminalFragment(), "terminal").commit();
     }
 
     /** 장비 연결 없이도 SC 설정과 가상 테스트 메뉴를 제공합니다. */
@@ -46,7 +115,15 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
                 | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
-        startActivityForResult(intent, 44);
+        try {
+            startActivityForResult(intent, 44);
+        } catch (ActivityNotFoundException | SecurityException | IllegalStateException e) {
+            android.util.Log.w("PlcLogExport", "자동 저장 폴더 선택창 열기 실패", e);
+            new androidx.appcompat.app.AlertDialog.Builder(this)
+                    .setTitle("폴더 선택창을 열 수 없습니다")
+                    .setMessage("파일 앱 또는 기기 관리 정책을 확인해 주세요.\n내부 로그 기록은 계속됩니다.\nAndroid 10 이상에서는 ‘쌓인 로그 내보내기’의 ‘다운로드에 저장’을 이용할 수 있습니다.")
+                    .setPositiveButton("확인", null).show();
+        }
     }
 
     /** 폴더 접근 권한을 유지하여 앱 재실행 후에도 자동 기록합니다. */
@@ -78,6 +155,36 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
     /** 공통 SC 설정과 가상 데이터 테스트 화면을 실행합니다. */
     @Override
     public boolean onOptionsItemSelected(android.view.MenuItem item) {
+        if (item.getItemId() == R.id.usb_terminal) {
+            showTerminal();
+            return true;
+        }
+        if (item.getItemId() == R.id.usb_devices) {
+            if (!(getSupportFragmentManager().findFragmentById(R.id.fragment) instanceof DevicesFragment))
+                getSupportFragmentManager().beginTransaction().replace(R.id.fragment, new DevicesFragment(), "devices")
+                        .addToBackStack("usb_devices").commit();
+            return true;
+        }
+        if (item.getItemId() == R.id.usb_retry) {
+            stopPending = false;
+            if (serialService != null) serialService.retryAutomatic();
+            else retryPending = true;
+            showTerminal();
+            return true;
+        }
+        if (item.getItemId() == R.id.usb_stop) {
+            retryPending = false;
+            pendingDeviceSelection = null;
+            if (serialService != null) serialService.stopAutomatic();
+            else stopPending = true;
+            return true;
+        }
+        if (item.getItemId() == R.id.log_export) {
+            if (getSupportFragmentManager().findFragmentByTag(PlcLogExportDialog.TAG) == null) {
+                new PlcLogExportDialog().show(getSupportFragmentManager(), PlcLogExportDialog.TAG);
+            }
+            return true;
+        }
         if (item.getItemId() == R.id.log_folder) {
             chooseLogFolder();
             return true;
@@ -112,12 +219,12 @@ public class MainActivity extends AppCompatActivity implements FragmentManager.O
 
     @Override
     protected void onNewIntent(Intent intent) {
-        if ("android.hardware.usb.action.USB_DEVICE_ATTACHED".equals(intent.getAction())) {
-            TerminalFragment terminal = (TerminalFragment)getSupportFragmentManager().findFragmentByTag("terminal");
-            if (terminal != null)
-                terminal.status("USB device detected");
-        }
         super.onNewIntent(intent);
+        setIntent(intent);
+        if (intent.getAction() == null) {
+            showTerminal();
+            if (serialService != null) serialService.ensureMonitoring();
+        }
     }
 
 }

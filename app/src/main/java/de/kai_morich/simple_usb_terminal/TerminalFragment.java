@@ -1,18 +1,11 @@
 package de.kai_morich.simple_usb_terminal;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.AlertDialog;
-import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
 import android.content.ComponentName;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.ServiceConnection;
-import android.hardware.usb.UsbDevice;
-import android.hardware.usb.UsbDeviceConnection;
-import android.hardware.usb.UsbManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
@@ -36,13 +29,10 @@ import android.widget.ToggleButton;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
-import androidx.core.content.ContextCompat;
 import androidx.fragment.app.Fragment;
 
 import com.hoho.android.usbserial.driver.SerialTimeoutException;
-import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
-import com.hoho.android.usbserial.driver.UsbSerialProber;
 import com.hoho.android.usbserial.util.XonXoffFilter;
 
 import java.io.IOException;
@@ -53,11 +43,11 @@ import java.util.EnumSet;
 
 public class TerminalFragment extends Fragment implements ServiceConnection, SerialListener {
 
-    private enum Connected { False, Pending, True }
+    private enum Connected { False, True }
 
     private final Handler mainLooper;
-    private final BroadcastReceiver broadcastReceiver;
-    private int deviceId, portNum, baudRate;
+    private Context boundContext;
+    private String lastStatus;
     private UsbSerialPort usbSerialPort;
     private SerialService service;
 
@@ -67,7 +57,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     private TextUtil.HexWatcher hexWatcher;
 
     private Connected connected = Connected.False;
-    private boolean initialStart = true;
     private boolean hexEnabled = false;
     private enum SendButtonState {Idle, Busy, Disabled};
 
@@ -79,15 +68,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
 
     public TerminalFragment() {
         mainLooper = new Handler(Looper.getMainLooper());
-        broadcastReceiver = new BroadcastReceiver() {
-            @Override
-            public void onReceive(Context context, Intent intent) {
-                if(Constants.INTENT_ACTION_GRANT_USB.equals(intent.getAction())) {
-                    Boolean granted = intent.getBooleanExtra(UsbManager.EXTRA_PERMISSION_GRANTED, false);
-                    connect(granted);
-                }
-            }
-        };
     }
 
     /*
@@ -98,59 +78,33 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         super.onCreate(savedInstanceState);
         setHasOptionsMenu(true);
         setRetainInstance(true);
-        deviceId = getArguments().getInt("device");
-        portNum = getArguments().getInt("port");
-        baudRate = getArguments().getInt("baud");
-    }
-
-    @Override
-    public void onDestroy() {
-        if (connected != Connected.False)
-            disconnect();
-        getActivity().stopService(new Intent(getActivity(), SerialService.class));
-        super.onDestroy();
     }
 
     @Override
     public void onStart() {
         super.onStart();
-        if(service != null)
-            service.attach(this);
-        else
-            getActivity().startService(new Intent(getActivity(), SerialService.class)); // prevents service destroy on unbind from recreated activity caused by orientation change
-        ContextCompat.registerReceiver(getActivity(), broadcastReceiver, new IntentFilter(Constants.INTENT_ACTION_GRANT_USB), ContextCompat.RECEIVER_NOT_EXPORTED);
+        Context context = requireContext();
+        if (context.bindService(new Intent(context, SerialService.class), this, Context.BIND_AUTO_CREATE))
+            boundContext = context;
     }
 
     @Override
     public void onStop() {
-        getActivity().unregisterReceiver(broadcastReceiver);
-        if(service != null && !getActivity().isChangingConfigurations())
-            service.detach();
+        if (service != null) service.detach();
+        if (boundContext != null) {
+            boundContext.unbindService(this);
+            boundContext = null;
+        }
+        service = null;
+        usbSerialPort = null;
+        connected = Connected.False;
         super.onStop();
-    }
-
-    @SuppressWarnings("deprecation") // onAttach(context) was added with API 23. onAttach(activity) works for all API versions
-    @Override
-    public void onAttach(@NonNull Activity activity) {
-        super.onAttach(activity);
-        getActivity().bindService(new Intent(getActivity(), SerialService.class), this, Context.BIND_AUTO_CREATE);
-    }
-
-    @Override
-    public void onDetach() {
-        try { getActivity().unbindService(this); } catch(Exception ignored) {}
-        super.onDetach();
     }
 
     @Override
     public void onResume() {
         super.onResume();
-        if(initialStart && service != null) {
-            initialStart = false;
-            getActivity().runOnUiThread(this::connect);
-        }
-        if(connected == Connected.True)
-            controlLines.start();
+        updateConnectionState();
     }
 
     @Override
@@ -160,18 +114,37 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     }
 
     @Override
+    public void onDestroyView() {
+        controlLines.stop();
+        controlLines.onDestroyView();
+        receiveText = null;
+        sendText = null;
+        sendBtn = null;
+        hexWatcher = null;
+        super.onDestroyView();
+    }
+
+    @Override
     public void onServiceConnected(ComponentName name, IBinder binder) {
+        if (boundContext == null || receiveText == null) return;
         service = ((SerialService.SerialBinder) binder).getService();
         service.attach(this);
-        if(initialStart && isResumed()) {
-            initialStart = false;
-            getActivity().runOnUiThread(this::connect);
-        }
+        service.ensureMonitoring();
+        onSerialStatus(service.getStatus());
     }
 
     @Override
     public void onServiceDisconnected(ComponentName name) {
         service = null;
+        updateConnectionState();
+    }
+
+    private void updateConnectionState() {
+        usbSerialPort = service != null ? service.getSerialPort() : null;
+        connected = service != null && service.isConnected() ? Connected.True : Connected.False;
+        if (connected == Connected.True && isResumed()) controlLines.start();
+        else controlLines.stop();
+        if (getActivity() != null) getActivity().invalidateOptionsMenu();
     }
 
     /*
@@ -194,7 +167,18 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         View sendBtn = view.findViewById(R.id.send_btn);
         sendBtn.setOnClickListener(v -> send(sendText.getText().toString()));
         controlLines.onCreateView(view);
+        lastStatus = null;
         return view;
+    }
+
+    @Override
+    public void onViewCreated(@NonNull View view, @Nullable Bundle state) {
+        super.onViewCreated(view, state);
+        TextView storage = view.findViewById(R.id.public_log_status);
+        de.kai_morich.simple_usb_terminal.plc.PlcPublicLogs publicLogs =
+                de.kai_morich.simple_usb_terminal.plc.PlcPublicLogs.get(requireContext());
+        publicLogs.status().observe(getViewLifecycleOwner(), storage::setText);
+        publicLogs.requestSync();
     }
 
     @Override
@@ -246,7 +230,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
             return true;
         } else if (id == R.id.backgroundNotification) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (!service.areNotificationsEnabled() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                if (service != null && !service.areNotificationsEnabled() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
                     requestPermissions(new String[]{Manifest.permission.POST_NOTIFICATIONS}, 0);
                 } else {
                     showNotificationSettings();
@@ -270,76 +254,6 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     /*
      * Serial + UI
      */
-    private void connect() {
-        connect(null);
-    }
-
-    private void connect(Boolean permissionGranted) {
-        UsbDevice device = null;
-        UsbManager usbManager = (UsbManager) getActivity().getSystemService(Context.USB_SERVICE);
-        for(UsbDevice v : usbManager.getDeviceList().values())
-            if(v.getDeviceId() == deviceId)
-                device = v;
-        if(device == null) {
-            status("connection failed: device not found");
-            return;
-        }
-        UsbSerialDriver driver = UsbSerialProber.getDefaultProber().probeDevice(device);
-        if(driver == null) {
-            driver = CustomProber.getCustomProber().probeDevice(device);
-        }
-        if(driver == null) {
-            status("connection failed: no driver for device");
-            return;
-        }
-        if(driver.getPorts().size() < portNum) {
-            status("connection failed: not enough ports at device");
-            return;
-        }
-        usbSerialPort = driver.getPorts().get(portNum);
-        UsbDeviceConnection usbConnection = usbManager.openDevice(driver.getDevice());
-        if(usbConnection == null && permissionGranted == null && !usbManager.hasPermission(driver.getDevice())) {
-            int flags = Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_MUTABLE : 0;
-            Intent intent = new Intent(Constants.INTENT_ACTION_GRANT_USB);
-            intent.setPackage(getActivity().getPackageName());
-            PendingIntent usbPermissionIntent = PendingIntent.getBroadcast(getActivity(), 0, intent, flags);
-            usbManager.requestPermission(driver.getDevice(), usbPermissionIntent);
-            return;
-        }
-        if(usbConnection == null) {
-            if (!usbManager.hasPermission(driver.getDevice()))
-                status("connection failed: permission denied");
-            else
-                status("connection failed: open failed");
-            return;
-        }
-
-        connected = Connected.Pending;
-        try {
-            usbSerialPort.open(usbConnection);
-            try {
-                usbSerialPort.setParameters(baudRate, UsbSerialPort.DATABITS_8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
-            } catch (UnsupportedOperationException e) {
-                status("Setting serial parameters failed: " + e.getMessage());
-            }
-            SerialSocket socket = new SerialSocket(getActivity().getApplicationContext(), usbConnection, usbSerialPort);
-            service.connect(socket, baudRate);
-            // usb connect is not asynchronous. connect-success and connect-error are returned immediately from socket.connect
-            // for consistency to bluetooth/bluetooth-LE app use same SerialListener and SerialService classes
-            onSerialConnect();
-        } catch (Exception e) {
-            onSerialConnectError(e);
-        }
-    }
-
-    private void disconnect() {
-        connected = Connected.False;
-        controlLines.stop();
-        service.disconnect();
-        updateSendBtn(SendButtonState.Idle);
-        usbSerialPort = null;
-    }
-
     private void send(String str) {
         if(connected != Connected.True) {
             Toast.makeText(getActivity(), "not connected", Toast.LENGTH_SHORT).show();
@@ -360,7 +274,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         try {
             SpannableStringBuilder spn = new SpannableStringBuilder(msg + '\n');
             spn.setSpan(new ForegroundColorSpan(getResources().getColor(R.color.colorSendText)), 0, spn.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-            receiveText.append(spn);
+            appendReceived(spn);
             service.write(data);
         } catch (SerialTimeoutException e) { // e.g. writing large data at low baud rate or suspended by flow control
             mainLooper.post(() -> sendAgain(data, e.bytesTransferred));
@@ -393,6 +307,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     }
 
     private void receive(ArrayDeque<byte[]> datas) {
+        if (receiveText == null) return;
         SpannableStringBuilder spn = new SpannableStringBuilder();
         for (byte[] data : datas) {
             if (flowControlFilter != null)
@@ -400,7 +315,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
             if (hexEnabled) {
                 spn.append(TextUtil.toHexString(data)).append('\n');
             } else {
-                String msg = new String(data);
+                String msg = de.kai_morich.simple_usb_terminal.plc.PlcBytes.display(data);
                 if (newline.equals(TextUtil.newline_crlf) && msg.length() > 0) {
                     // don't show CR as ^M if directly before LF
                     msg = msg.replace(TextUtil.newline_crlf, TextUtil.newline_lf);
@@ -419,16 +334,27 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
                 spn.append(TextUtil.toCaretString(msg, newline.length() != 0));
             }
         }
-        receiveText.append(spn);
+        appendReceived(spn);
+    }
+
+    private void appendReceived(CharSequence text) {
+        if (receiveText == null) return;
+        receiveText.append(text);
+        if (receiveText.length() > 30000) {
+            CharSequence tail = receiveText.getText().subSequence(receiveText.length() - 20000, receiveText.length());
+            receiveText.setText(new SpannableStringBuilder(tail));
+        }
     }
 
     void status(String str) {
+        if (receiveText == null) return;
         SpannableStringBuilder spn = new SpannableStringBuilder(str + '\n');
         spn.setSpan(new ForegroundColorSpan(getResources().getColor(R.color.colorStatusText)), 0, spn.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
-        receiveText.append(spn);
+        appendReceived(spn);
     }
 
     void updateSendBtn(SendButtonState state) {
+        if (sendBtn == null) return;
         sendBtn.setEnabled(state == SendButtonState.Idle);
         sendBtn.setImageAlpha(state == SendButtonState.Idle ? 255 : 64);
         sendBtn.setImageResource(state == SendButtonState.Disabled ? R.drawable.ic_block_white_24dp : R.drawable.ic_send_white_24dp);
@@ -445,28 +371,27 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         startActivity(intent);
     }
 
-
-    @Override
-    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
-        if(Arrays.equals(permissions, new String[]{Manifest.permission.POST_NOTIFICATIONS}) &&
-                Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !service.areNotificationsEnabled())
-            showNotificationSettings();
-    }
-
     /*
      * SerialListener
      */
     @Override
+    public void onSerialStatus(String message) {
+        updateConnectionState();
+        if (message != null && !message.equals(lastStatus)) {
+            status(message);
+            lastStatus = message;
+        }
+    }
+
+    @Override
     public void onSerialConnect() {
-        status("connected");
-        connected = Connected.True;
-        controlLines.start();
+        updateConnectionState();
     }
 
     @Override
     public void onSerialConnectError(Exception e) {
         status("connection failed: " + e.getMessage());
-        disconnect();
+        updateConnectionState();
     }
 
     @Override
@@ -490,7 +415,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
     @Override
     public void onSerialIoError(Exception e) {
         status("connection lost: " + e.getMessage());
-        disconnect();
+        updateConnectionState();
     }
 
     class ControlLines {
@@ -523,6 +448,9 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         }
 
         void onPrepareOptionsMenu(Menu menu) {
+            menu.findItem(R.id.controlLines).setEnabled(connected == Connected.True);
+            menu.findItem(R.id.flowControl).setEnabled(connected == Connected.True);
+            menu.findItem(R.id.sendBreak).setEnabled(connected == Connected.True);
             try {
                 EnumSet<UsbSerialPort.ControlLine> scl = usbSerialPort.getSupportedControlLines();
                 EnumSet<UsbSerialPort.FlowControl> sfc = usbSerialPort.getSupportedFlowControl();
@@ -594,6 +522,11 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         }
 
         void start() {
+            if (frame == null || usbSerialPort == null || !isResumed()) return;
+            flowControl = usbSerialPort.getFlowControl();
+            if (flowControl == UsbSerialPort.FlowControl.XON_XOFF_INLINE && flowControlFilter == null)
+                flowControlFilter = new XonXoffFilter();
+            if (flowControl != UsbSerialPort.FlowControl.XON_XOFF_INLINE) flowControlFilter = null;
             if (showControlLines) {
                 try {
                     EnumSet<UsbSerialPort.ControlLine> lines = usbSerialPort.getSupportedControlLines();
@@ -620,8 +553,14 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
             }
         }
 
+        void onDestroyView() {
+            frame = null;
+            rtsBtn = ctsBtn = dtrBtn = dsrBtn = cdBtn = riBtn = null;
+        }
+
         void stop() {
             mainLooper.removeCallbacks(runnable);
+            if (frame == null) return;
             sendAllowed = true;
             updateSendBtn(SendButtonState.Idle);
             rtsBtn.setChecked(false);
@@ -633,7 +572,7 @@ public class TerminalFragment extends Fragment implements ServiceConnection, Ser
         }
 
         private void run() {
-            if (connected != Connected.True)
+            if (connected != Connected.True || frame == null || usbSerialPort == null)
                 return;
             try {
                 if (showControlLines) {
